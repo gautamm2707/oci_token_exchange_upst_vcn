@@ -27,12 +27,6 @@ Configure these repository secrets before running the workflow:
 | `USER_OCID` | User OCID accepted by the OCI SDK config when using the UPST security token |
 | `TF_VAR_TENANCY_OCID` | Tenancy OCID for the Terraform provider |
 | `TF_VAR_COMPARTMENT_OCID` | Compartment OCID where the VCN will be created |
-| `TF_BACKEND_BUCKET` | OCI Object Storage bucket used for Terraform state through the S3-compatible endpoint |
-| `TF_BACKEND_KEY` | Terraform state object key |
-| `TF_BACKEND_REGION` | Backend region |
-| `TF_BACKEND_ENDPOINT` | OCI Object Storage S3-compatible endpoint |
-| `AWS_ACCESS_KEY_ID` | Customer secret key access key for the S3-compatible backend |
-| `AWS_SECRET_ACCESS_KEY` | Customer secret key secret for the S3-compatible backend |
 
 ## Optional GitHub Variables
 
@@ -57,3 +51,5 @@ These can be repository variables or edited in `terraform/vcn/terraform.tfvars.e
 4. Choose `plan`, `apply`, or `destroy`.
 
 The workflow creates an ephemeral RSA key pair, requests a GitHub OIDC JWT, exchanges it for an OCI UPST token, writes a temporary OCI CLI config, and runs Terraform in `terraform/vcn`.
+
+Terraform uses local state inside the GitHub Actions run. If you later want durable state across repeated applies/destroys, add a remote backend such as OCI Object Storage.

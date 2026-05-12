@@ -38,8 +38,6 @@ jobs:
       TF_VAR_subnet_cidr_block: ${{ vars.TF_VAR_subnet_cidr_block || '10.10.1.0/24' }}
       TF_VAR_subnet_dns_label: ${{ vars.TF_VAR_subnet_dns_label || 'public' }}
       TF_VAR_allowed_ssh_cidr: ${{ vars.TF_VAR_allowed_ssh_cidr || '' }}
-      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-      AWS_REQUEST_CHECKSUM_VALIDATION: when_required
 
     steps:
       - name: Checkout
@@ -67,23 +65,10 @@ jobs:
           check_required "USER_OCID" "$USER_OCID"
           check_required "TF_VAR_TENANCY_OCID or OCI_TENANCY" "$TF_VAR_tenancy_ocid"
           check_required "TF_VAR_COMPARTMENT_OCID" "$TF_VAR_compartment_ocid"
-          check_required "TF_BACKEND_BUCKET" "$TF_BACKEND_BUCKET"
-          check_required "TF_BACKEND_KEY" "$TF_BACKEND_KEY"
-          check_required "TF_BACKEND_REGION" "$TF_BACKEND_REGION"
-          check_required "TF_BACKEND_ENDPOINT" "$TF_BACKEND_ENDPOINT"
-          check_required "AWS_ACCESS_KEY_ID" "$AWS_ACCESS_KEY_ID"
-          check_required "AWS_SECRET_ACCESS_KEY" "$AWS_SECRET_ACCESS_KEY"
 
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
-        env:
-          TF_BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET }}
-          TF_BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY }}
-          TF_BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION }}
-          TF_BACKEND_ENDPOINT: ${{ secrets.TF_BACKEND_ENDPOINT }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Generate ephemeral RSA key pair
         run: |
@@ -149,26 +134,7 @@ jobs:
 
       - name: Terraform init
         working-directory: terraform/vcn
-        run: |
-          cat > backend.auto.hcl <<EOF
-          bucket = "${TF_BACKEND_BUCKET}"
-          key = "${TF_BACKEND_KEY}"
-          region = "${TF_BACKEND_REGION}"
-          endpoints = {
-            s3 = "${TF_BACKEND_ENDPOINT}"
-          }
-          access_key = "${AWS_ACCESS_KEY_ID}"
-          secret_key = "${AWS_SECRET_ACCESS_KEY}"
-          EOF
-
-          terraform init -backend-config=backend.auto.hcl
-        env:
-          TF_BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET }}
-          TF_BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY }}
-          TF_BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION }}
-          TF_BACKEND_ENDPOINT: ${{ secrets.TF_BACKEND_ENDPOINT }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: terraform init
 
       - name: Terraform validate
         working-directory: terraform/vcn
