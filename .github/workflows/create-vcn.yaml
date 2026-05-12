@@ -1,0 +1,199 @@
+name: Create OCI VCN with JWT to UPST
+
+"on":
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Terraform action to run
+        type: choice
+        required: true
+        default: plan
+        options:
+          - plan
+          - apply
+          - destroy
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  upst-vcn:
+    runs-on: ubuntu-latest
+
+    env:
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+      DOMAIN_BASE_URL: ${{ secrets.DOMAIN_BASE_URL }}
+      OCI_TENANCY: ${{ secrets.OCI_TENANCY }}
+      OCI_REGION: ${{ secrets.OCI_REGION }}
+      USER_OCID: ${{ secrets.USER_OCID }}
+      TF_VAR_region: ${{ vars.TF_VAR_region || secrets.OCI_REGION }}
+      TF_VAR_tenancy_ocid: ${{ secrets.TF_VAR_TENANCY_OCID || secrets.OCI_TENANCY }}
+      TF_VAR_compartment_ocid: ${{ secrets.TF_VAR_COMPARTMENT_OCID }}
+      TF_VAR_vcn_display_name: ${{ vars.TF_VAR_vcn_display_name || 'github-upst-vcn' }}
+      TF_VAR_vcn_cidr_block: ${{ vars.TF_VAR_vcn_cidr_block || '10.10.0.0/16' }}
+      TF_VAR_vcn_dns_label: ${{ vars.TF_VAR_vcn_dns_label || 'upstvcn' }}
+      TF_VAR_subnet_display_name: ${{ vars.TF_VAR_subnet_display_name || 'github-upst-public-subnet' }}
+      TF_VAR_subnet_cidr_block: ${{ vars.TF_VAR_subnet_cidr_block || '10.10.1.0/24' }}
+      TF_VAR_subnet_dns_label: ${{ vars.TF_VAR_subnet_dns_label || 'public' }}
+      TF_VAR_allowed_ssh_cidr: ${{ vars.TF_VAR_allowed_ssh_cidr || '' }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_REQUEST_CHECKSUM_VALIDATION: when_required
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          required=(
+            CLIENT_ID
+            CLIENT_SECRET
+            DOMAIN_BASE_URL
+            OCI_TENANCY
+            OCI_REGION
+            USER_OCID
+            TF_VAR_tenancy_ocid
+            TF_VAR_compartment_ocid
+            TF_BACKEND_BUCKET
+            TF_BACKEND_KEY
+            TF_BACKEND_REGION
+            TF_BACKEND_ENDPOINT
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+          )
+
+          missing=0
+          for name in "${required[@]}"; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing secret::$name is required"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+        env:
+          TF_BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET }}
+          TF_BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY }}
+          TF_BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION }}
+          TF_BACKEND_ENDPOINT: ${{ secrets.TF_BACKEND_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Generate ephemeral RSA key pair
+        run: |
+          mkdir -p .oci
+          openssl genrsa -out .oci/upst_private.pem 2048
+          openssl rsa -in .oci/upst_private.pem -pubout -out .oci/upst_public.pem
+          chmod 600 .oci/upst_private.pem .oci/upst_public.pem
+
+      - name: Prepare public key for UPST exchange
+        run: |
+          awk '/BEGIN PUBLIC KEY/ {skip=1; next} /END PUBLIC KEY/ {skip=0; next} skip {gsub(/\r/, ""); printf "%s", $0;}' \
+            .oci/upst_public.pem > .oci/upst_public.one_line.pem
+
+      - name: Fetch GitHub OIDC JWT
+        run: |
+          curl -sSfL -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${CLIENT_ID}" > .oci/id-token.json
+
+          jq -er '.value' .oci/id-token.json > .oci/id-token.jwt
+
+      - name: Exchange JWT for OCI UPST
+        run: |
+          auth_header=$(printf "%s" "${CLIENT_ID}:${CLIENT_SECRET}" | base64 | tr -d '\n')
+          subject_token=$(tr -d '\n' < .oci/id-token.jwt)
+          public_key=$(tr -d '\n' < .oci/upst_public.one_line.pem)
+
+          curl -sSfL \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --header "Authorization: Basic ${auth_header}" \
+            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+            --data-urlencode "requested_token_type=urn:oci:token-type:oci-upst" \
+            --data-urlencode "subject_token=${subject_token}" \
+            --data-urlencode "subject_token_type=jwt" \
+            --data-urlencode "public_key=${public_key}" \
+            "${DOMAIN_BASE_URL}/oauth2/v1/token" > .oci/upst-response.json
+
+          jq -er '.token' .oci/upst-response.json | tr -d '\n' > .oci/upst.token
+          echo "UPST token was successfully extracted"
+
+      - name: Configure OCI SDK security token profile
+        run: |
+          mkdir -p "$HOME/.oci"
+          cp .oci/upst_private.pem "$HOME/.oci/upst_private.pem"
+          cp .oci/upst.token "$HOME/.oci/upst.token"
+          chmod 600 "$HOME/.oci/upst_private.pem" "$HOME/.oci/upst.token"
+
+          fingerprint=$(openssl rsa -pubout -outform DER -in "$HOME/.oci/upst_private.pem" 2>/dev/null | openssl md5 -c | awk '{print $2}')
+
+          cat > "$HOME/.oci/config" <<EOF
+          [DEFAULT]
+          user=${USER_OCID}
+          region=${OCI_REGION}
+          tenancy=${OCI_TENANCY}
+          fingerprint=${fingerprint}
+          key_file=$HOME/.oci/upst_private.pem
+          security_token_file=$HOME/.oci/upst.token
+          EOF
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.0
+
+      - name: Terraform init
+        working-directory: terraform/vcn
+        run: |
+          cat > backend.auto.hcl <<EOF
+          bucket = "${TF_BACKEND_BUCKET}"
+          key = "${TF_BACKEND_KEY}"
+          region = "${TF_BACKEND_REGION}"
+          endpoints = {
+            s3 = "${TF_BACKEND_ENDPOINT}"
+          }
+          access_key = "${AWS_ACCESS_KEY_ID}"
+          secret_key = "${AWS_SECRET_ACCESS_KEY}"
+          EOF
+
+          terraform init -backend-config=backend.auto.hcl
+        env:
+          TF_BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET }}
+          TF_BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY }}
+          TF_BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION }}
+          TF_BACKEND_ENDPOINT: ${{ secrets.TF_BACKEND_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Terraform validate
+        working-directory: terraform/vcn
+        run: terraform validate
+
+      - name: Terraform plan
+        if: inputs.action == 'plan'
+        working-directory: terraform/vcn
+        run: terraform plan
+
+      - name: Terraform apply
+        if: inputs.action == 'apply'
+        working-directory: terraform/vcn
+        run: terraform apply -auto-approve
+
+      - name: Terraform destroy
+        if: inputs.action == 'destroy'
+        working-directory: terraform/vcn
+        run: terraform destroy -auto-approve
+
+      - name: Upload token exchange diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-upst-diagnostics
+          path: |
+            .oci/id-token.json
+            .oci/upst-response.json
+            .oci/upst_public.one_line.pem
+          if-no-files-found: ignore
