@@ -95,7 +95,9 @@ jobs:
           subject_token=$(tr -d '\n' < .oci/id-token.jwt)
           public_key=$(tr -d '\n' < .oci/upst_public.one_line.pem)
 
-          curl -sSfL \
+          http_code=$(curl -sSL \
+            --output .oci/upst-response.json \
+            --write-out "%{http_code}" \
             --header "Content-Type: application/x-www-form-urlencoded" \
             --header "Authorization: Basic ${auth_header}" \
             --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
@@ -103,7 +105,14 @@ jobs:
             --data-urlencode "subject_token=${subject_token}" \
             --data-urlencode "subject_token_type=jwt" \
             --data-urlencode "public_key=${public_key}" \
-            "${DOMAIN_BASE_URL}/oauth2/v1/token" > .oci/upst-response.json
+            "${DOMAIN_BASE_URL}/oauth2/v1/token")
+
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::error title=OCI UPST token exchange failed::OCI token endpoint returned HTTP ${http_code}"
+            echo "Sanitized OCI response:"
+            jq -c 'del(.token, .access_token, .id_token, .refresh_token)' .oci/upst-response.json || cat .oci/upst-response.json
+            exit 1
+          fi
 
           jq -er '.token' .oci/upst-response.json | tr -d '\n' > .oci/upst.token
           echo "UPST token was successfully extracted"
