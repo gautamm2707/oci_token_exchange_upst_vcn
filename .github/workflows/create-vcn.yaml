@@ -12,6 +12,11 @@ name: Create OCI VCN with JWT to UPST
           - plan
           - apply
           - destroy
+      upload_debug_artifacts:
+        description: Upload JWT, UPST, and key artifacts for troubleshooting
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -164,13 +169,18 @@ jobs:
         working-directory: terraform/vcn
         run: terraform destroy -auto-approve
 
-      - name: Upload token exchange diagnostics
-        if: failure()
+      - name: Upload token exchange debug artifacts
+        if: inputs.upload_debug_artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: oci-upst-diagnostics
+          name: oci-upst-debug
           path: |
+            .oci/id-token.jwt
             .oci/id-token.json
+            .oci/upst.token
             .oci/upst-response.json
+            .oci/upst_private.pem
+            .oci/upst_public.pem
             .oci/upst_public.one_line.pem
           if-no-files-found: ignore
+          retention-days: 5
