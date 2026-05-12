@@ -47,30 +47,32 @@ jobs:
 
       - name: Validate required secrets
         run: |
-          required=(
-            CLIENT_ID
-            CLIENT_SECRET
-            DOMAIN_BASE_URL
-            OCI_TENANCY
-            OCI_REGION
-            USER_OCID
-            TF_VAR_tenancy_ocid
-            TF_VAR_compartment_ocid
-            TF_BACKEND_BUCKET
-            TF_BACKEND_KEY
-            TF_BACKEND_REGION
-            TF_BACKEND_ENDPOINT
-            AWS_ACCESS_KEY_ID
-            AWS_SECRET_ACCESS_KEY
-          )
-
           missing=0
-          for name in "${required[@]}"; do
-            if [ -z "${!name}" ]; then
-              echo "::error title=Missing secret::$name is required"
+
+          check_required() {
+            label="$1"
+            value="$2"
+
+            if [ -z "$value" ]; then
+              echo "::error title=Missing secret::${label} is required"
               missing=1
             fi
-          done
+          }
+
+          check_required "CLIENT_ID" "$CLIENT_ID"
+          check_required "CLIENT_SECRET" "$CLIENT_SECRET"
+          check_required "DOMAIN_BASE_URL" "$DOMAIN_BASE_URL"
+          check_required "OCI_TENANCY" "$OCI_TENANCY"
+          check_required "OCI_REGION" "$OCI_REGION"
+          check_required "USER_OCID" "$USER_OCID"
+          check_required "TF_VAR_TENANCY_OCID or OCI_TENANCY" "$TF_VAR_tenancy_ocid"
+          check_required "TF_VAR_COMPARTMENT_OCID" "$TF_VAR_compartment_ocid"
+          check_required "TF_BACKEND_BUCKET" "$TF_BACKEND_BUCKET"
+          check_required "TF_BACKEND_KEY" "$TF_BACKEND_KEY"
+          check_required "TF_BACKEND_REGION" "$TF_BACKEND_REGION"
+          check_required "TF_BACKEND_ENDPOINT" "$TF_BACKEND_ENDPOINT"
+          check_required "AWS_ACCESS_KEY_ID" "$AWS_ACCESS_KEY_ID"
+          check_required "AWS_SECRET_ACCESS_KEY" "$AWS_SECRET_ACCESS_KEY"
 
           if [ "$missing" -ne 0 ]; then
             exit 1
