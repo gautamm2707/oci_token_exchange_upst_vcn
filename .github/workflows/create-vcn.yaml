@@ -185,3 +185,4 @@ jobs:
             .oci/upst_public.one_line.pem
           if-no-files-found: ignore
           retention-days: 5
+          include-hidden-files: true
