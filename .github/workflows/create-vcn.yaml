@@ -106,9 +106,10 @@ jobs:
             --header "Content-Type: application/x-www-form-urlencoded" \
             --header "Authorization: Basic ${auth_header}" \
             --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
-            --data-urlencode "requested_token_type=urn:oci:token-type:oci-upst" \
+            --data-urlencode "requested_token_type=urn:oci:token-type:oci-rpst" \
             --data-urlencode "subject_token=${subject_token}" \
             --data-urlencode "subject_token_type=jwt" \
+            --data-urlencode "res_type=ref_github" \
             --data-urlencode "public_key=${public_key}" \
             "${DOMAIN_BASE_URL}/oauth2/v1/token")
 
